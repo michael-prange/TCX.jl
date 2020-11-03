@@ -36,39 +36,38 @@ function parse_tcx(tcxdoc::EzXML.Document)
         return CLIENT_TCX_ERROR, nothing
     end
 
-    # Type - "/*/*[1]/*[1]/@Sport"
-    aType = nodecontent(findfirst("/*/*[1]/*[1]/@Sport", tcxdoc))
-    # Id - "/*/*[1]/*/*[1]"
-    xid = nodecontent(findfirst("/*/*[1]/*/*[1]", tcxdoc))
-
+    activities = findnode(root_element, "Activities")
+    activity = findnode(activities, "Activity")
+    aType = activity["Sport"]
+    id = findnode(activity, "Id")
+    xid = nodecontent(id)
     aId = convertToDateTime(xid)
-    # Name = "/*/*[1]/*[1]/*[3]"
-    aName = nodecontent(findfirst("/*/*[1]/*/*[2]", tcxdoc))
-    # Lap - "/*/*[1]/*/*[2]"
-    # TotalSeconds - "/*/*[1]/*/*[2]/*[1]"
-    aTime = parse(Float64, nodecontent(findfirst("/*/*[1]/*/*[2]/*[1]", tcxdoc)))
-    aDistance = parse(Float64, nodecontent(findfirst("/*/*[1]/*/*[2]/*[2]", tcxdoc)))
-    # DistanceMeters - "/*/*[1]/*/*[2]/*[2]"
-    # AverageHeartRateBpm - "/*/*[1]/*/*[2]/*[5]/*[1]"
-    xbpm = findfirst("/*/*[1]/*/*[2]/*[5]/*[1]", tcxdoc)
-    if xbpm === nothing
-        aHeartRateBpm = 0
-    else
-        aHeartRateBpm = parse(Int32, nodecontent(xbpm))
-    end
-    # TrackPoints - "/*/*[1]/*/*[2]/*[9]/*"
-    tp_Points = findall("/*/*[1]/*/*[2]/*[9]/*", tcxdoc)
-    aTrackPoints = Array{TrackPoint, size(tp_Points, 1)}[]
-    for tp in tp_Points
-        xtime = nodecontent(findfirst("./*[local-name()='Time']", tp))
+    lap = findnode(activity, "Lap")
+    aName = nodecontent(lap)
+    xtime = findnode(lap, "TotalTimeSeconds")
+    aTime = parse(Float64, nodecontent(xtime))
+    xDistance= findnode(lap, "DistanceMeters")
+    aDistance = nodecontent0(Float64, xDistance)
+    xbpm = findnode(lap, "AverageHeartRateBpm", false)
+    aHeartRateBpm = (xbpm === nothing) ? 0 : nodecontent0(Int32, firstelement(xbpm))
+    tp_Points = findnode(lap, "Track")
+    aTrackPoints = Array{TrackPoint, countelements(tp_Points)}[]
+    for tp in elements(tp_Points)
+        xtime = nodecontent(findnode(tp, "Time"))
         tp_time = convertToDateTime(xtime)
-        tp_lat = parseNode(Float64, "./*[local-name()='Position']/*[local-name()='LatitudeDegrees']", tp)
-        tp_lont = parseNode(Float64, "./*[local-name()='Position']/*[local-name()='LatitudeDegrees']", tp)
-        tp_bpm = parseNode(Int32, "./*[local-name()='HeartRateBpm']/*[1]", tp)
-        tp_dist = parseNode(Float64, "./*[local-name()='TPX']", tp)
-        tp_alt = parseNode(Float64, "./*[local-name()='AltitudeMeters']", tp)
+        position = findnode(tp, "Position", false)
+        if position == nothing
+            tp_lat = tp_lon = 0.0
+        else
+            tp_lat = nodecontent0(Float64, findnode(position, "LatitudeDegrees"))
+            tp_lon = nodecontent0(Float64, findnode(position, "LatitudeDegrees"))
+        end
+        xbpm = findnode(tp, "HeartRateBpm", false)
+        tp_bpm = (xbpm === nothing) ? 0 : nodecontent0(Int32, firstelement(xbpm))
+        tp_dist = nodecontent0(Float32, findnode(tp, "DistanceMeters", false))
+        tp_alt = nodecontent0(Float64, findnode(tp, "AltitudeMeters", false))
 
-        aTrackPoints = vcat(aTrackPoints, TrackPoint(tp_time, tp_lat, tp_lont, tp_bpm, tp_dist, tp_alt))
+        aTrackPoints = vcat(aTrackPoints, TrackPoint(tp_time, tp_lat, tp_lon, tp_bpm, tp_alt, tp_dist))
     end
 
     return OK, TCXRecord(aId, aName, aType, aDistance, aTime, aHeartRateBpm, aTrackPoints)
@@ -115,21 +114,33 @@ function warn_on_tcx_error(status::Int, thing::String, isFile::Bool)
     end
 end
 
-#=
-= Parses an XML node based on an XPATH and data type.
-=
-= If the node is a `nothing` value, the function returns the data
-= type's version of 0
-=#
-function parseNode(dType, path, node)
-    node_check = findfirst(path, node)
-    if node_check !== nothing
-        return parse(dType, nodecontent(node_check))
+# Returns <code>nodecontent(node)</code>, or zero::dType if node==nothing.
+function nodecontent0(dType, node)
+    if node !== nothing
+        return parse(dType, nodecontent(node))
     else
         return dType(0)
     end
 end
 
+# Returns the first occurance of a child node of <code>node</code> 
+# named <code>name</code>. Returns <code>nothing</code> if there
+# is no such node. Issue a warning if <code>warn</code> is true.
+function findnode(node::EzXML.Node, name::String, warn::Bool=true)
+    n = firstnode(node)
+    while(nodename(n) !== name && hasnextnode(n))
+        n = nextnode(n)
+    end
+    if nodename(n) == name
+        return n
+    else
+        if warn
+            @warn "Can't find $name"
+        end
+        return nothing
+    end
+end
+                            
 function parse_tcx_dir(path::String)
     if ispath(path) == false
         @warn "Invalid path: $path"

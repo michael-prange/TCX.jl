@@ -23,7 +23,7 @@ using Test
 
     @testset "CASE: Test DataFrame after process dir" begin
         err, ta =  TCX.parse_tcx_dir(".")
-        @test (err == TCX.OK) & (size(getDataFrame(ta), 1) == 10087)
+        @test (err == TCX.OK) & (size(getDataFrame(ta), 1) == 10847)
     end
 end
 
